@@ -8,6 +8,8 @@ python-multipart>=0.0.9
 bleach>=6.1,<7.0
 apscheduler>=3.10,<4.0
 httpx>=0.27,<1.0
+psycopg==3.3.4
+psycopg-binary==3.3.4
 
 # Optional -- only needed if EMAIL_PROVIDER=resend
 resend>=1.0,<2.0
