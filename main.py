@@ -3,8 +3,8 @@ main.py
 -------
 The HITL Approval Service.
 
-Why this service exists (see README.md "Architectural Analysis" for the
-full discussion): a Langflow custom component executes inside a single,
+Why this service exists (see README.md "Architecture" for the full
+discussion): a Langflow custom component executes inside a single,
 bounded flow run. It cannot stay alive in memory for minutes/hours/days
 waiting for a reviewer to click a link in an email, and it cannot receive
 an inbound HTTP request itself. So the actual "waiting" and "receiving the
@@ -18,14 +18,35 @@ Internal (called by the Langflow component; protected by X-Internal-Api-Key):
 
 Public (opened by the human reviewer from the email; no auth beyond the
 unguessable token, rate-limited, single-use):
-  GET  /approval/{token}                       review page (shows AI response
-                                                + any approver input fields)
-  POST /approval/{token}/decide                submit decision
-  GET  /approval/{token}/approve                convenience one-click approve
-                                                (only used when there are NO
-                                                approver input fields configured)
-  GET  /approval/{token}/reject                 convenience one-click reject
-                                                (same condition as above)
+  GET  /approval/{token}                       full review page, shows the
+                                                AI response and both
+                                                Approve/Reject options (not
+                                                linked from the default
+                                                email, kept for manual/
+                                                shared links)
+  GET  /approval/{token}/approve                confirm page pre-selected
+                                                for Approve: shows the AI
+                                                response, any approver
+                                                input fields, and a single
+                                                "Confirm Approval" button.
+                                                Read-only -- does NOT record
+                                                a decision by itself.
+  GET  /approval/{token}/reject                 same, pre-selected Reject
+  POST /approval/{token}/decide                 the actual state change.
+                                                Called by the confirm
+                                                button's form (or the full
+                                                review page's form).
+
+Design note on GET /approve and /reject: these are intentionally
+side-effect-free. They only render a page with one confirm button that the
+human must click; that click is what issues the state-changing POST above.
+This matters because mail clients and corporate security gateways (Outlook
+Safe Links, Proofpoint, Mimecast, Defender for Office 365, etc.) routinely
+pre-fetch every link in an incoming email to scan it for malware, before a
+human ever opens the message. If a bare GET performed the approval, those
+automated scans could silently approve or reject a request with nobody
+involved -- the same failure mode that has burned "one-click unsubscribe"
+links industry-wide. See README.md "Architecture" for the full picture.
 
 Operational:
   GET  /healthz
@@ -142,8 +163,8 @@ def create_approval_request(
     finally:
         db.close()
 
-    approve_url = f"{settings.public_base_url}/approval/{created.token}"
-    reject_url = approve_url  # same review page; decision made there
+    approve_url = f"{settings.public_base_url}/approval/{created.token}/approve"
+    reject_url = f"{settings.public_base_url}/approval/{created.token}/reject"
 
     try:
         html_body = templates.get_template("email_approval.html").render(
@@ -157,7 +178,7 @@ def create_approval_request(
         )
         text_body = (
             f"{approval_message}\n\nAI Response:\n{ai_response}\n\n"
-            f"Review and decide: {approve_url}\n\nRequest ID: {created.request_id}\n"
+            f"Approve: {approve_url}\nReject: {reject_url}\n\nRequest ID: {created.request_id}\n"
             f"Expires: {created.expires_at.isoformat(sep=' ', timespec='minutes')} UTC"
         )
         send_approval_email(reviewer_email, email_subject, html_body, text_body)
@@ -318,49 +339,48 @@ async def decide(token: str, request: Request):
 
 
 @app.get("/approval/{token}/approve", response_class=HTMLResponse)
-def approve_shortcut(token: str, request: Request):
-    return _one_click(token, request, ApprovalStatus.APPROVED)
+def confirm_approve_page(token: str, request: Request):
+    return _render_confirm_page(token, request, ApprovalStatus.APPROVED)
 
 
 @app.get("/approval/{token}/reject", response_class=HTMLResponse)
-def reject_shortcut(token: str, request: Request):
-    return _one_click(token, request, ApprovalStatus.REJECTED)
+def confirm_reject_page(token: str, request: Request):
+    return _render_confirm_page(token, request, ApprovalStatus.REJECTED)
 
 
-def _one_click(token: str, request: Request, decision: ApprovalStatus) -> HTMLResponse:
-    """Only allowed when the request has zero configured approver input
-    fields -- otherwise we force the reviewer through the review page so
-    required fields can't be silently skipped."""
+def _render_confirm_page(token: str, request: Request, decision: ApprovalStatus) -> HTMLResponse:
+    """Renders a page with exactly one confirm button for the given decision.
+    Deliberately read-only (no state change) so that automated link
+    prescanners hitting this GET cannot trigger an approval/rejection --
+    only the human's subsequent click on the "Confirm ..." button, which
+    issues the actual state-changing POST to /decide, can do that."""
     _rate_limit_or_429(request)
     db = get_session()
     try:
         row = crud.get_by_token_hash(db, hash_token(token))
         if row is None:
             return _render_result(request, kind="invalid", request_id="unknown")
-        if row.approver_input_schema:
-            html = templates.get_template("page_review.html").render(
-                ai_response_escaped=sanitize_for_html(row.ai_response),
-                approver_fields=row.approver_input_schema,
-                submit_url=f"/approval/{token}/decide",
-                request_id=row.request_id,
-                expires_at=row.expires_at.isoformat(sep=" ", timespec="minutes"),
-                error="Please fill in the required fields below to record your decision.",
-            )
-            return HTMLResponse(html)
-
-        try:
-            updated = crud.record_decision(
-                db, row, decision=decision, reviewer_comment=None, approver_inputs={}
-            )
-        except crud.AlreadyResolvedError:
+        if row.status == ApprovalStatus.EXPIRED:
+            return _render_result(request, kind="expired", request_id=row.request_id)
+        if row.status != ApprovalStatus.PENDING:
             return _render_result(request, kind="already_resolved", request_id=row.request_id)
 
-        notify_continuation(updated)
-        kind = "approved" if decision == ApprovalStatus.APPROVED else "rejected"
-        return _render_result(request, kind=kind, request_id=updated.request_id)
+        decision_str = "approve" if decision == ApprovalStatus.APPROVED else "reject"
+        switch_str = "reject" if decision == ApprovalStatus.APPROVED else "approve"
+        html = templates.get_template("page_confirm.html").render(
+            decision=decision_str,
+            decision_label="Approval" if decision == ApprovalStatus.APPROVED else "Rejection",
+            ai_response_escaped=sanitize_for_html(row.ai_response),
+            approver_fields=row.approver_input_schema or [],
+            submit_url=f"/approval/{token}/decide",
+            switch_url=f"/approval/{token}/{switch_str}",
+            request_id=row.request_id,
+            expires_at=row.expires_at.isoformat(sep=" ", timespec="minutes"),
+            error=None,
+        )
+        return HTMLResponse(html)
     finally:
         db.close()
-
 
 @app.get("/healthz")
 def healthz():
