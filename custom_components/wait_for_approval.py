@@ -180,9 +180,9 @@ class WaitForApprovalComponent(Component):
     ]
 
     outputs = [
-        Output(display_name="Approved", name="approved", method="run_approved"),
-        Output(display_name="Rejected", name="rejected", method="run_rejected"),
-        Output(display_name="Pending / Info", name="pending", method="run_pending"),
+        Output(display_name="Approved", name="approved", method="run_approved", group_outputs=True),
+        Output(display_name="Rejected", name="rejected", method="run_rejected", group_outputs=True),
+        Output(display_name="Pending / Info", name="pending", method="run_pending", group_outputs=True),
     ]
 
     # -- internal helpers -----------------------------------------------
