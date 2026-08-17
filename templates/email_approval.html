@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Approval Required</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f4f5f7;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f5f7;padding:32px 0;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb;">
+          <tr>
+            <td style="background:#4f46e5;padding:20px 32px;">
+              <span style="color:#ffffff;font-size:18px;font-weight:600;">Approval Required &mdash; AI Response Review</span>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:24px 32px;">
+              <p style="color:#374151;font-size:14px;line-height:1.5;margin:0 0 16px 0;">{{ approval_message }}</p>
+
+              <div style="border:1px solid #e5e7eb;border-radius:6px;padding:16px;background:#f9fafb;margin-bottom:24px;">
+                <div style="font-size:11px;letter-spacing:0.05em;color:#6b7280;text-transform:uppercase;font-weight:600;margin-bottom:8px;">
+                  AI Response Requiring Approval
+                </div>
+                <pre style="white-space:pre-wrap;word-break:break-word;font-family:inherit;font-size:14px;color:#111827;margin:0;">{{ ai_response_escaped }}</pre>
+              </div>
+
+              <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto 24px auto;">
+                <tr>
+                  <td style="padding-right:12px;">
+                    <a href="{{ approve_url }}" style="display:inline-block;background:#16a34a;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:6px;font-weight:600;font-size:14px;">
+                      Approve
+                    </a>
+                  </td>
+                  <td>
+                    <a href="{{ reject_url }}" style="display:inline-block;background:#dc2626;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:6px;font-weight:600;font-size:14px;">
+                      Reject
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              {% if has_approver_inputs %}
+              <p style="color:#6b7280;font-size:12px;line-height:1.5;margin:0 0 16px 0;">
+                This request has additional review fields (e.g. a comment). Clicking either button will
+                take you to a secure page where you can fill those in before confirming your decision.
+              </p>
+              {% endif %}
+
+              <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;">
+
+              <p style="color:#9ca3af;font-size:12px;margin:0 0 4px 0;">Request ID: {{ request_id }}</p>
+              <p style="color:#9ca3af;font-size:12px;margin:0;">This link expires on {{ expires_at }} (UTC) and can only be used once.</p>
+            </td>
+          </tr>
+        </table>
+        <p style="color:#9ca3af;font-size:11px;margin-top:16px;">If you were not expecting this email, you can ignore it &mdash; the link will expire automatically.</p>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
